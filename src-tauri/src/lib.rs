@@ -1,7 +1,7 @@
 pub mod commands;
 pub mod model;
 pub mod pcapng_writer;
-mod pipeline;
+pub mod pipeline;
 pub mod protobuf;
 pub mod reassembly;
 pub mod source;
@@ -16,6 +16,7 @@ pub fn run() {
             commands::parse_pcap,
             commands::get_detail,
             commands::get_stats,
+            commands::save_displayed_pcapng,
             commands::list_interfaces,
             commands::count_proto_files,
             commands::start_capture,

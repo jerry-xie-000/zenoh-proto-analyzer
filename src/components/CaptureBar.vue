@@ -1,35 +1,33 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { save } from '@tauri-apps/plugin-dialog'
-import { CirclePause, CirclePlay, CircleStop, Eye, HardDriveDownload, Radio, X } from 'lucide-vue-next'
+import { CirclePause, CirclePlay, CircleStop, Eye, HardDriveDownload, Radio } from 'lucide-vue-next'
 import { useAnalyzerStore } from '../stores/analyzer'
 
 const store = useAnalyzerStore()
+const savedInfo = ref<{ path: string; frames: number } | null>(null)
 onMounted(() => store.loadInterfaces())
 
-const SAVE_KEY = 'zenoh-analyzer.save-path'
-const savePath = ref(localStorage.getItem(SAVE_KEY) ?? '')
+function startCapture() {
+  store.startCapture()
+}
 
-async function pickSavePath() {
+async function saveCapturedNow() {
   const d = new Date()
   const p = (n: number) => String(n).padStart(2, '0')
   const def = `zenoh-capture-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.pcapng`
   const path = await save({
-    title: '保存捕获会话为 Wireshark 格式',
+    title: '把刚才捕获的全部原始帧保存为 pcapng',
     defaultPath: def,
     filters: [{ name: 'pcapng', extensions: ['pcapng'] }],
   })
-  savePath.value = typeof path === 'string' ? path : ''
-  if (savePath.value) localStorage.setItem(SAVE_KEY, savePath.value)
-}
-
-function clearSavePath() {
-  savePath.value = ''
-  localStorage.removeItem(SAVE_KEY)
-}
-
-function startCapture() {
-  store.startCapture(savePath.value || undefined)
+  if (typeof path !== 'string' || !path) return
+  try {
+    const n = await store.saveDisplayedPcapng(path)
+    savedInfo.value = { path, frames: n }
+  } catch (e) {
+    store.error = String(e)
+  }
 }
 </script>
 
@@ -52,21 +50,12 @@ function startCapture() {
     />
 
     <button
-      class="btn"
-      :class="{ 'border-accent text-accent': savePath }"
-      :disabled="store.capturing"
-      title="捕获时同步保存为 Wireshark 可打开的 pcapng 文件"
-      @click="pickSavePath"
+      v-if="store.mode === 'live' && store.rows.length > 0"
+      class="btn text-accent hover:border-accent"
+      title="把刚才捕获的全部原始帧保存为 pcapng（Wireshark 可直接打开）"
+      @click="saveCapturedNow"
     >
-      <HardDriveDownload :size="15" /> 保存到文件
-    </button>
-    <button
-      v-if="savePath && !store.capturing"
-      class="p-1 text-text-dim hover:text-red"
-      title="清除保存路径"
-      @click="clearSavePath"
-    >
-      <X :size="13" />
+      <HardDriveDownload :size="15" /> 保存原始帧
     </button>
 
     <button v-if="!store.capturing" class="btn text-green hover:border-green" @click="startCapture">
@@ -106,9 +95,9 @@ function startCapture() {
     显示已暂停，后台缓冲 {{ store.pausedBuffer.length }} 条…
   </div>
   <div
-    v-if="store.savedInfo"
+    v-if="savedInfo"
     class="flex items-center gap-2 px-3 py-1 bg-green/10 border-b border-green/30 text-green text-[12px]"
   >
-    ✓ 已保存 {{ store.savedInfo.frames }} 帧到 {{ store.savedInfo.path }}
+    ✓ 已保存 {{ savedInfo.frames }} 帧到 {{ savedInfo.path }}
   </div>
 </template>

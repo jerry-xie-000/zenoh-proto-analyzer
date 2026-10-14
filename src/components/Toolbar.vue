@@ -24,6 +24,7 @@ async function pickPcap() {
   if (typeof path === 'string') await store.openPcap(path)
 }
 
+
 async function pickProtoDir() {
   const dir = await open({ title: '选择 proto 定义根目录', directory: true })
   if (typeof dir === 'string') {
@@ -115,6 +116,7 @@ watch(() => store.protoDir, countProto, { immediate: true })
     <button class="btn" :disabled="!store.stats" title="统计面板" @click="showStats = true">
       <ChartColumn :size="15" /> 统计
     </button>
+
 
     <button class="btn text-red hover:border-red" :disabled="store.rows.length === 0" title="清空数据" @click="store.clearData()">
       <Trash2 :size="15" />

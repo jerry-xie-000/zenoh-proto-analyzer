@@ -28,6 +28,8 @@ pub struct Analyzer {
     /// 请求配对状态（实时模式增量维护；文件模式构建时一次性回填）
     pub rid_map: HashMap<(String, u32), usize>,
     pub pair: HashMap<usize, usize>,
+    /// 帧号 → 原始以太网帧（保存 pcapng 用）
+    pub frames_data: HashMap<u32, Vec<u8>>,
 }
 
 /// 以太网/IP/TCP 解析结果
@@ -164,6 +166,12 @@ pub fn parse_file(pcap_path: &str, proto_dir: Option<&str>) -> Result<Analyzer, 
     // 按时间稳定排序（同时间按流内出现顺序）
     all.sort_by_key(|e| e.msg.ts_us);
 
+    let frames_map: HashMap<u32, Vec<u8>> = frames
+        .iter()
+        .enumerate()
+        .map(|(i, f)| ((i + 1) as u32, f.data.clone()))
+        .collect();
+
     let engine = match proto_dir {
         Some(dir) => match ProtoEngine::load(dir) {
             Ok(e) => Some(e),
@@ -174,7 +182,7 @@ pub fn parse_file(pcap_path: &str, proto_dir: Option<&str>) -> Result<Analyzer, 
         None => None,
     };
 
-    build_analyzer(all, engine)
+    build_analyzer(all, engine, frames_map)
 }
 
 struct ParsedEntry {
@@ -196,7 +204,11 @@ pub fn normalize_session(src: &str, dst: &str) -> (String, String) {
     }
 }
 
-fn build_analyzer(all: Vec<ParsedEntry>, engine: Option<ProtoEngine>) -> Result<Analyzer, String> {
+fn build_analyzer(
+    all: Vec<ParsedEntry>,
+    engine: Option<ProtoEngine>,
+    frames_map: HashMap<u32, Vec<u8>>,
+) -> Result<Analyzer, String> {
     let mut entries = Vec::new();
     let mut warnings = Vec::new();
     let base_ts = all.first().map(|e| e.msg.ts_us).unwrap_or(0);
@@ -356,6 +368,7 @@ fn build_analyzer(all: Vec<ParsedEntry>, engine: Option<ProtoEngine>) -> Result<
         engine,
         rid_map: HashMap::new(),
         pair: HashMap::new(),
+        frames_data: frames_map,
     })
 }
 

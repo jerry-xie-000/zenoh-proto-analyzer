@@ -58,6 +58,50 @@ pub fn get_stats(state: State<'_, AppState>) -> Result<Stats, String> {
     Ok(analyzer.stats.clone())
 }
 
+/// 把当前显示的行对应的原始帧保存为 pcapng（Wireshark 可直接打开）
+#[tauri::command]
+pub fn save_displayed_pcapng(
+    state: State<'_, AppState>,
+    path: String,
+    indexes: Vec<usize>,
+) -> Result<usize, String> {
+    let guard = state.analyzer.lock().unwrap();
+    let analyzer = guard.as_ref().ok_or("尚未解析任何数据")?;
+
+    let mut w = crate::pcapng_writer::PcapNgWriter::create(&path)
+        .map_err(|e| format!("创建保存文件失败: {e}"))?;
+    let mut seen = std::collections::HashSet::new();
+    let mut count = 0usize;
+    for &idx in &indexes {
+        let Some(entry) = analyzer.entries.get(idx) else { continue };
+        let frame_no = entry.row.frame_number;
+        if frame_no == 0 || !seen.insert(frame_no) {
+            continue;
+        }
+        if let Some(data) = analyzer.frames_data.get(&frame_no) {
+            w.write_frame(entry.row.ts_us, data)
+                .map_err(|e| format!("写入失败: {e}"))?;
+            count += 1;
+        }
+    }
+    w.finish().map_err(|e| format!("收尾失败: {e}"))?;
+    if count == 0 {
+        let fn_sample: Vec<u32> = analyzer
+            .entries
+            .iter()
+            .take(5)
+            .map(|e| e.row.frame_number)
+            .collect();
+        return Err(format!(
+            "诊断: 0 帧写出 | entries={} frames_data={} indexes={} 帧号样本={fn_sample:?}",
+            analyzer.entries.len(),
+            analyzer.frames_data.len(),
+            indexes.len()
+        ));
+    }
+    Ok(count)
+}
+
 // ---------- 实时模式 ----------
 
 #[tauri::command]
@@ -130,7 +174,6 @@ fn adapter_alias(_device_name: &str) -> Option<String> {
 pub enum LiveEvent {
     /// rows: 新增行；updates: 被更新配对信息的已有行（按 index 覆盖）
     Rows { rows: Vec<PacketRow>, updates: Vec<PacketRow>, total: usize },
-    Saved { path: String, frames: u64 },
     Error { message: String },
 }
 
@@ -140,7 +183,6 @@ pub fn start_capture(
     interface: String,
     bpf: String,
     proto_dir: Option<String>,
-    save_path: Option<String>,
     on_rows: Channel<LiveEvent>,
 ) -> Result<(), String> {
     let engine = match &proto_dir {
@@ -166,12 +208,6 @@ pub fn start_capture(
     }
     let shared = state.analyzer.clone();
 
-    let mut writer = match &save_path {
-        Some(p) => Some(crate::pcapng_writer::PcapNgWriter::create(p)
-            .map_err(|e| format!("创建保存文件失败: {e}"))?),
-        None => None,
-    };
-
     let stop = Arc::new(AtomicBool::new(false));
     let stop2 = stop.clone();
     let shared2 = shared.clone();
@@ -186,11 +222,6 @@ pub fn start_capture(
                 Ok(pkt) => {
                     let ts_us = (pkt.header.ts.tv_sec as i64) * 1_000_000
                         + (pkt.header.ts.tv_usec as i64);
-                    if let Some(w) = writer.as_mut() {
-                        if let Err(e) = w.write_frame(ts_us, pkt.data) {
-                            let _ = on_rows.send(LiveEvent::Error { message: format!("保存文件写入失败: {e}") });
-                        }
-                    }
                     let msgs = live.feed(pkt.data, ts_us);
                     if msgs.is_empty() {
                         continue;
@@ -201,7 +232,7 @@ pub fn start_capture(
                     let mut guard = shared2.lock().unwrap();
                     if let Some(an) = guard.as_mut() {
                         for m in msgs {
-                            let out = an.append_live(m);
+                            let out = an.append_live(m, pkt.data);
                             rows.push(out[0].clone());
                             if out.len() > 1 {
                                 updates.push(out[1].clone());
@@ -220,19 +251,6 @@ pub fn start_capture(
             }
         }
         let _ = on_rows.send(LiveEvent::Rows { rows: Vec::new(), updates: Vec::new(), total: 0 });
-        if let Some(w) = writer.take() {
-            let frames = w.frames();
-            match w.finish() {
-                Ok(()) => {
-                    if let Some(p) = &save_path {
-                        let _ = on_rows.send(LiveEvent::Saved { path: p.clone(), frames });
-                    }
-                }
-                Err(e) => {
-                    let _ = on_rows.send(LiveEvent::Error { message: format!("保存文件收尾失败: {e}") });
-                }
-            }
-        }
     });
 
     *state.live.lock().unwrap() = Some(LiveHandle {
@@ -260,6 +278,7 @@ pub(crate) struct LiveParser {
     pub(crate) flows: HashMap<FlowKey, LiveFlow>,
     base_ts: Option<i64>,
     pending: Vec<zenoh::ParsedMessage>,
+    frame_no: u64,
 }
 
 #[derive(Clone)]
@@ -279,11 +298,19 @@ impl LiveParser {
             flows: HashMap::new(),
             base_ts: None,
             pending: Vec::new(),
+            frame_no: 0,
         }
+    }
+
+    /// 每个进入的包编号递增，供行级帧号显示
+    pub(crate) fn next_frame(&mut self) -> u64 {
+        self.frame_no += 1;
+        self.frame_no
     }
 
     /// 返回本次新解析出的消息
     pub(crate) fn feed(&mut self, frame: &[u8], ts_us: i64) -> Vec<zenoh::ParsedMessage> {
+        self.next_frame(); // 包编号递增（行级帧号显示）
         let Some(seg) = crate::pipeline::parse_tcp_frame(frame) else {
             return Vec::new();
         };
@@ -376,6 +403,9 @@ impl LiveParser {
         // topic 延迟解析：mapping 表已在本流 declare 时更新，统一 resolve
         let mut msgs = std::mem::take(&mut self.pending);
         zenoh::resolve_all(&mut msgs, &(a.clone(), b.clone()), is_a, &self.sessions);
+        for m in &mut msgs {
+            m.frame_number = self.frame_no as u32;
+        }
         msgs
     }
 }
@@ -399,12 +429,13 @@ impl Analyzer {
             engine,
             rid_map: HashMap::new(),
             pair: HashMap::new(),
+            frames_data: HashMap::new(),
         }
     }
 
     /// 实时模式追加一条消息，返回行数据
     /// 实时模式追加一条消息。返回需通知前端的行：[新增行, (可选)被更新配对的 Request 行]
-    pub fn append_live(&mut self, m: zenoh::ParsedMessage) -> Vec<PacketRow> {
+    pub fn append_live(&mut self, m: zenoh::ParsedMessage, frame_data: &[u8]) -> Vec<PacketRow> {
         let msg_class = m.msg_type.split('(').next().unwrap_or("").to_string();
         let base = m.ts_us; // 实时模式相对基准=各自首包（由前端以第一行为准）
         let (outer_type, any_type, summary, device_id) = match &self.engine {
@@ -462,6 +493,11 @@ impl Analyzer {
         self.entries.push(entry);
         let index = self.entries.len() - 1;
 
+        // 帧号 → 原始帧（保存 pcapng 用）
+        if m.frame_number != 0 && !frame_data.is_empty() {
+            self.frames_data.insert(m.frame_number, frame_data.to_vec());
+        }
+
         // 请求响应配对（增量）：每个 Response 都回指 Request 并计算 RTT；
         // Request 指向最新 Response（该行需推送给前端更新）
         let mut updated_req: Option<PacketRow> = None;
@@ -516,13 +552,53 @@ mod tests {
         let mut an = Analyzer::empty(None);
         for f in &frames {
             for m in live.feed(&f.data, f.ts_us) {
-                an.append_live(m);
+                an.append_live(m, &[]);
             }
         }
         let pairs = an.pair.len() / 2;
         let with_rtt = an.entries.iter().filter(|e| e.row.rtt_ms.is_some()).count();
         println!("实时配对数: {pairs}, 带 RTT: {with_rtt}");
 
+
         assert!(pairs > 20, "实时配对过少: {pairs}");
+    }
+}
+
+#[cfg(test)]
+mod save_tests {
+    use super::*;
+
+    /// 模拟实时捕获 + 保存链路
+    #[test]
+    fn live_save_produces_frames() {
+        let frames = crate::source::read_file("../../测试用例/33333.pcapng").unwrap();
+        let mut live = LiveParser::new();
+        let mut an = Analyzer::empty(None);
+        let mut fed = 0usize;
+        for f in &frames {
+            for m in live.feed(&f.data, f.ts_us) {
+                an.append_live(m, &f.data);
+            }
+            fed += 1;
+        }
+        println!("喂入包数: {fed}, 行数: {}, frames_data: {}", an.entries.len(), an.frames_data.len());
+        let zero = an.entries.iter().filter(|e| e.row.frame_number == 0).count();
+        println!("帧号0的行: {zero}");
+
+        let out = "../../测试用例/_test_save.pcapng";
+        let mut w = crate::pcapng_writer::PcapNgWriter::create(out).unwrap();
+        let mut seen = std::collections::HashSet::new();
+        let mut count = 0;
+        for e in &an.entries {
+            let fn_ = e.row.frame_number;
+            if fn_ == 0 || !seen.insert(fn_) { continue; }
+            if let Some(d) = an.frames_data.get(&fn_) {
+                w.write_frame(e.row.ts_us, d).unwrap();
+                count += 1;
+            }
+        }
+        w.finish().unwrap();
+        println!("写出帧数: {count}");
+        assert!(count > 100, "保存帧数过少: {count}");
     }
 }

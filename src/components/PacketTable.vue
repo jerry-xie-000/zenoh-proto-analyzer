@@ -13,7 +13,7 @@ interface Col {
   title: string
   w: number
 }
-const DEFAULT_WIDTHS = [130, 70, 130, 320, 70, 160, 240]
+const DEFAULT_WIDTHS = [64, 120, 70, 130, 320, 70, 160, 240]
 const WIDTHS_KEY = 'zenoh-analyzer.table-widths'
 
 function loadWidths(): number[] {
@@ -32,13 +32,14 @@ const widths = ref<number[]>(loadWidths())
 watch(widths, (v) => localStorage.setItem(WIDTHS_KEY, JSON.stringify(v)), { deep: true })
 
 const cols = computed<Col[]>(() => [
-  { key: 'time', title: '时间', w: widths.value[0] },
-  { key: 'dir', title: '方向', w: widths.value[1] },
-  { key: 'type', title: 'Zenoh 消息', w: widths.value[2] },
-  { key: 'topic', title: 'Topic', w: widths.value[3] },
-  { key: 'pair', title: '配对', w: widths.value[4] },
-  { key: 'summary', title: '摘要', w: widths.value[5] },
-  { key: 'device', title: '设备', w: widths.value[6] },
+  { key: 'no', title: '帧号', w: widths.value[0] },
+  { key: 'time', title: '时间', w: widths.value[1] },
+  { key: 'dir', title: '方向', w: widths.value[2] },
+  { key: 'type', title: 'Zenoh 消息', w: widths.value[3] },
+  { key: 'topic', title: 'Topic', w: widths.value[4] },
+  { key: 'pair', title: '配对', w: widths.value[5] },
+  { key: 'summary', title: '摘要', w: widths.value[6] },
+  { key: 'device', title: '设备', w: widths.value[7] },
 ])
 
 const gridTemplate = computed(() => widths.value.map((w) => `${w}px`).join(' '))
@@ -282,6 +283,7 @@ function typeClass(t: string): string {
             :title="list[vrow.index].warnings.join('；')"
             @click="store.selectRow(list[vrow.index].index)"
           >
+            <div class="text-text-dim truncate">{{ list[vrow.index].frameNumber || list[vrow.index].index + 1 }}</div>
             <div class="truncate">{{ fmtAbsTime(list[vrow.index].tsUs) }}</div>
             <div class="truncate" :class="list[vrow.index].direction === '→设备' ? 'text-orange' : 'text-cyan'">
               {{ list[vrow.index].direction }}

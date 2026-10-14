@@ -71,7 +71,6 @@ export interface InterfaceInfo {
 
 export type LiveEvent =
   | { kind: 'rows'; rows: PacketRow[]; updates: PacketRow[]; total: number }
-  | { kind: 'saved'; path: string; frames: number }
   | { kind: 'error'; message: string }
 
 export interface ZenohField {
