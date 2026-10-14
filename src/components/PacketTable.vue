@@ -32,7 +32,7 @@ const widths = ref<number[]>(loadWidths())
 watch(widths, (v) => localStorage.setItem(WIDTHS_KEY, JSON.stringify(v)), { deep: true })
 
 const cols = computed<Col[]>(() => [
-  { key: 'no', title: '帧号', w: widths.value[0] },
+  { key: 'no', title: '序号', w: widths.value[0] },
   { key: 'time', title: '时间', w: widths.value[1] },
   { key: 'dir', title: '方向', w: widths.value[2] },
   { key: 'type', title: 'Zenoh 消息', w: widths.value[3] },
@@ -283,7 +283,7 @@ function typeClass(t: string): string {
             :title="list[vrow.index].warnings.join('；')"
             @click="store.selectRow(list[vrow.index].index)"
           >
-            <div class="text-text-dim truncate">{{ list[vrow.index].frameNumber || list[vrow.index].index + 1 }}</div>
+            <div class="text-text-dim truncate">{{ vrow.index + 1 }}</div>
             <div class="truncate">{{ fmtAbsTime(list[vrow.index].tsUs) }}</div>
             <div class="truncate" :class="list[vrow.index].direction === '→设备' ? 'text-orange' : 'text-cyan'">
               {{ list[vrow.index].direction }}

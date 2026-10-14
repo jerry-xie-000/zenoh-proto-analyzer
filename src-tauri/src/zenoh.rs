@@ -70,7 +70,10 @@ pub struct ParsedMessage {
     pub rid: Option<u32>,
     pub sn: Option<u32>,
     pub payload: Vec<u8>,
+    /// 主帧号（UI 显示）
     pub frame_number: u32,
+    /// 消息关联的全部帧（TCP 分段时一个 batch 跨多帧）
+    pub frame_numbers: Vec<u32>,
     pub ts_us: i64,
 }
 
@@ -406,6 +409,7 @@ fn parse_push(
         sn: None,
         payload,
         frame_number: frame,
+        frame_numbers: vec![frame],
         ts_us: ts,
     })
 }
@@ -469,6 +473,7 @@ fn parse_request(
         sn: None,
         payload,
         frame_number: frame,
+        frame_numbers: vec![frame],
         ts_us: ts,
     })
 }
@@ -543,6 +548,7 @@ fn parse_response(
         sn: None,
         payload,
         frame_number: frame,
+        frame_numbers: vec![frame],
         ts_us: ts,
     })
 }
@@ -559,6 +565,7 @@ fn parse_response_final(r: &mut Reader, header: u8, frame: u32, ts: i64) -> Opti
         sn: None,
         payload: Vec::new(),
         frame_number: frame,
+        frame_numbers: vec![frame],
         ts_us: ts,
     })
 }
@@ -656,6 +663,7 @@ fn parse_declare(
         sn: None,
         payload: Vec::new(),
         frame_number: frame,
+        frame_numbers: vec![frame],
         ts_us: ts,
     })
 }
@@ -701,6 +709,7 @@ fn parse_interest(r: &mut Reader, header: u8, frame: u32, ts: i64) -> Option<Par
         sn: None,
         payload: Vec::new(),
         frame_number: frame,
+        frame_numbers: vec![frame],
         ts_us: ts,
     })
 }
@@ -727,6 +736,7 @@ fn parse_network_oam(r: &mut Reader, header: u8, frame: u32, ts: i64) -> Option<
         sn: None,
         payload: Vec::new(),
         frame_number: frame,
+        frame_numbers: vec![frame],
         ts_us: ts,
     })
 }

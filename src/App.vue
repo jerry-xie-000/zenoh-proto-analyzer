@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { listen } from '@tauri-apps/api/event'
+import { getCurrentWebview } from '@tauri-apps/api/webview'
 import Toolbar from './components/Toolbar.vue'
 import CaptureBar from './components/CaptureBar.vue'
 import PacketTable from './components/PacketTable.vue'
@@ -12,6 +13,7 @@ import { useAnalyzerStore } from './stores/analyzer'
 const store = useAnalyzerStore()
 const showStats = ref(false)
 const split = ref<InstanceType<typeof SplitPane> | null>(null)
+const dragging = ref(false)
 
 // Esc 退出最大化
 onMounted(() => {
@@ -23,11 +25,24 @@ onMounted(() => {
     store.protoDir = e.payload[1]
     store.openPcap(e.payload[0])
   })
+  // 拖放 pcapng/pcap 文件到窗口自动打开
+  getCurrentWebview().onDragDropEvent((event) => {
+    if (event.payload.type === 'enter' || event.payload.type === 'over') {
+      dragging.value = event.payload.type === 'enter'
+    } else if (event.payload.type === 'drop') {
+      dragging.value = false
+      const paths = event.payload.paths
+      const pcap = paths.find((p) => /\.(pcapng|pcap|cap)$/i.test(p))
+      if (pcap) store.openPcap(pcap)
+    } else {
+      dragging.value = false
+    }
+  })
 })
 </script>
 
 <template>
-  <div class="h-full flex flex-col">
+  <div class="h-full flex flex-col relative" :class="{ 'ring-2 ring-accent ring-inset': dragging }">
     <Toolbar v-model:show-stats="showStats" />
     <CaptureBar />
 

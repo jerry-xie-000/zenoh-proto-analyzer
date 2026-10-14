@@ -78,8 +78,8 @@ pub fn save_displayed_pcapng(
         if frame_no == 0 || !seen.insert(frame_no) {
             continue;
         }
-        if let Some(data) = analyzer.frames_data.get(&frame_no) {
-            w.write_frame(entry.row.ts_us, data)
+        if let Some((ts, data)) = analyzer.frames_data.get(&frame_no) {
+            w.write_frame(*ts, data)
                 .map_err(|e| format!("写入失败: {e}"))?;
             count += 1;
         }
@@ -214,6 +214,7 @@ pub fn start_capture(
 
     let handle = std::thread::spawn(move || {
         let mut live = LiveParser::new();
+        let mut live_frame_no = 0u32;
         loop {
             if stop2.load(Ordering::Relaxed) {
                 break;
@@ -222,7 +223,16 @@ pub fn start_capture(
                 Ok(pkt) => {
                     let ts_us = (pkt.header.ts.tv_sec as i64) * 1_000_000
                         + (pkt.header.ts.tv_usec as i64);
-                    let msgs = live.feed(pkt.data, ts_us);
+                    live_frame_no += 1;
+                    // 每个原始包在到达时即存入帧库（消息可能关联之前的段）
+                    shared2
+                        .lock()
+                        .unwrap()
+                        .as_mut()
+                        .unwrap()
+                        .frames_data
+                        .insert(live_frame_no, (ts_us, pkt.data.to_vec()));
+                    let msgs = live.feed(pkt.data, ts_us, live_frame_no);
                     if msgs.is_empty() {
                         continue;
                     }
@@ -232,7 +242,7 @@ pub fn start_capture(
                     let mut guard = shared2.lock().unwrap();
                     if let Some(an) = guard.as_mut() {
                         for m in msgs {
-                            let out = an.append_live(m, pkt.data);
+                            let out = an.append_live(m);
                             rows.push(out[0].clone());
                             if out.len() > 1 {
                                 updates.push(out[1].clone());
@@ -287,8 +297,8 @@ pub(crate) struct LiveFlow {
     next_rel: u64,
     pending: BTreeMap<u64, (Vec<u8>, i64)>,
     stream: Vec<u8>,
-    /// (字节偏移, 时间戳)
-    stream_marks: Vec<(usize, i64)>,
+    /// (字节偏移, 包编号, 时间戳)
+    stream_marks: Vec<(usize, u32, i64)>,
 }
 
 impl LiveParser {
@@ -302,15 +312,13 @@ impl LiveParser {
         }
     }
 
-    /// 每个进入的包编号递增，供行级帧号显示
-    pub(crate) fn next_frame(&mut self) -> u64 {
-        self.frame_no += 1;
-        self.frame_no
-    }
-
     /// 返回本次新解析出的消息
-    pub(crate) fn feed(&mut self, frame: &[u8], ts_us: i64) -> Vec<zenoh::ParsedMessage> {
-        self.next_frame(); // 包编号递增（行级帧号显示）
+    pub(crate) fn feed(
+        &mut self,
+        frame: &[u8],
+        ts_us: i64,
+        frame_no: u32,
+    ) -> Vec<zenoh::ParsedMessage> {
         let Some(seg) = crate::pipeline::parse_tcp_frame(frame) else {
             return Vec::new();
         };
@@ -357,7 +365,7 @@ impl LiveParser {
             if skip > 0 {
                 data.drain(..skip);
             }
-            flow.stream_marks.push((flow.stream.len(), ts));
+            flow.stream_marks.push((flow.stream.len(), frame_no, ts));
             flow.stream.extend_from_slice(&data);
             flow.next_rel = first + (skip + data.len()) as u64;
         }
@@ -377,12 +385,30 @@ impl LiveParser {
                 .stream_marks
                 .iter()
                 .rev()
-                .find(|(off, _)| *off <= consumed)
-                .map(|(_, t)| *t)
+                .find(|(off, ..)| *off <= consumed)
+                .map(|&(_, _, t)| t)
                 .unwrap_or(ts_us);
+            // 收集 batch 字节范围覆盖的段包号（跨段 batch 关联多帧）
+            let mut batch_frames: Vec<u32> = Vec::new();
+            for (i, &(off, fno, _)) in flow.stream_marks.iter().enumerate() {
+                if off >= consumed + 2 + len {
+                    break;
+                }
+                let seg_end = flow
+                    .stream_marks
+                    .get(i + 1)
+                    .map(|&(next_off, _, _)| next_off)
+                    .unwrap_or(flow.stream.len());
+                if seg_end > consumed {
+                    if batch_frames.last() != Some(&fno) {
+                        batch_frames.push(fno);
+                    }
+                }
+            }
             if self.base_ts.is_none() {
                 self.base_ts = Some(batch_ts);
             }
+            let before = self.pending.len();
             zenoh::parse_batch(
                 &batch,
                 0,
@@ -392,20 +418,24 @@ impl LiveParser {
                 &mut self.sessions,
                 &mut self.pending,
             );
+            // batch 关联的字节范围覆盖的段帧号（跨段 batch 关联多帧）
+            for m in self.pending.iter_mut().skip(before) {
+                m.frame_numbers = batch_frames.clone();
+                if m.frame_number == 0 {
+                    m.frame_number = *batch_frames.first().unwrap_or(&0);
+                }
+            }
             consumed += 2 + len;
         }
         flow.stream.drain(..consumed);
-        for (off, _) in flow.stream_marks.iter_mut() {
+        for (off, _, _) in flow.stream_marks.iter_mut() {
             *off = off.saturating_sub(consumed);
         }
-        flow.stream_marks.retain(|(off, _)| *off < flow.stream.len() + 1);
+        flow.stream_marks.retain(|(off, _, _)| *off < flow.stream.len() + 1);
 
         // topic 延迟解析：mapping 表已在本流 declare 时更新，统一 resolve
         let mut msgs = std::mem::take(&mut self.pending);
         zenoh::resolve_all(&mut msgs, &(a.clone(), b.clone()), is_a, &self.sessions);
-        for m in &mut msgs {
-            m.frame_number = self.frame_no as u32;
-        }
         msgs
     }
 }
@@ -435,7 +465,7 @@ impl Analyzer {
 
     /// 实时模式追加一条消息，返回行数据
     /// 实时模式追加一条消息。返回需通知前端的行：[新增行, (可选)被更新配对的 Request 行]
-    pub fn append_live(&mut self, m: zenoh::ParsedMessage, frame_data: &[u8]) -> Vec<PacketRow> {
+    pub fn append_live(&mut self, m: zenoh::ParsedMessage) -> Vec<PacketRow> {
         let msg_class = m.msg_type.split('(').next().unwrap_or("").to_string();
         let base = m.ts_us; // 实时模式相对基准=各自首包（由前端以第一行为准）
         let (outer_type, any_type, summary, device_id) = match &self.engine {
@@ -473,6 +503,7 @@ impl Analyzer {
             device_id,
             summary,
             rid: m.rid,
+            frame_numbers: m.frame_numbers.clone(),
             pair_index: None,
             rtt_ms: None,
             payload_len: m.payload.len(),
@@ -493,10 +524,7 @@ impl Analyzer {
         self.entries.push(entry);
         let index = self.entries.len() - 1;
 
-        // 帧号 → 原始帧（保存 pcapng 用）
-        if m.frame_number != 0 && !frame_data.is_empty() {
-            self.frames_data.insert(m.frame_number, frame_data.to_vec());
-        }
+
 
         // 请求响应配对（增量）：每个 Response 都回指 Request 并计算 RTT；
         // Request 指向最新 Response（该行需推送给前端更新）
@@ -551,8 +579,8 @@ mod tests {
         let mut live = LiveParser::new();
         let mut an = Analyzer::empty(None);
         for f in &frames {
-            for m in live.feed(&f.data, f.ts_us) {
-                an.append_live(m, &[]);
+            for m in live.feed(&f.data, f.ts_us, (i + 1) as u32) {
+                an.append_live(m);
             }
         }
         let pairs = an.pair.len() / 2;
@@ -576,8 +604,10 @@ mod save_tests {
         let mut an = Analyzer::empty(None);
         let mut fed = 0usize;
         for f in &frames {
-            for m in live.feed(&f.data, f.ts_us) {
-                an.append_live(m, &f.data);
+            an.frames_data
+                .insert((fed + 1) as u32, (f.ts_us, f.data.clone()));
+            for m in live.feed(&f.data, f.ts_us, (i + 1) as u32) {
+                an.append_live(m);
             }
             fed += 1;
         }
@@ -593,7 +623,8 @@ mod save_tests {
             let fn_ = e.row.frame_number;
             if fn_ == 0 || !seen.insert(fn_) { continue; }
             if let Some(d) = an.frames_data.get(&fn_) {
-                w.write_frame(e.row.ts_us, d).unwrap();
+                let (ts, d2) = d.clone();
+                w.write_frame(ts, &d2).unwrap();
                 count += 1;
             }
         }

@@ -3,6 +3,7 @@
 export interface PacketRow {
   index: number
   frameNumber: number
+  frameNumbers: number[]
   tsUs: number
   relUs: number
   src: string

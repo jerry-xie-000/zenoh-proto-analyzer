@@ -12,6 +12,8 @@ pub struct PacketRow {
     pub index: usize,
     /// 所在 pcap 帧号（1 起）
     pub frame_number: u32,
+    /// 关联的全部帧号（TCP 分段 batch 跨多帧）
+    pub frame_numbers: Vec<u32>,
     /// 绝对时间戳（微秒，Unix epoch）
     pub ts_us: i64,
     /// 相对首个 Zenoh 消息的时间（微秒，可为负/0）
