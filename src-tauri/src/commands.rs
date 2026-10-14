@@ -130,6 +130,7 @@ fn adapter_alias(_device_name: &str) -> Option<String> {
 pub enum LiveEvent {
     /// rows: 新增行；updates: 被更新配对信息的已有行（按 index 覆盖）
     Rows { rows: Vec<PacketRow>, updates: Vec<PacketRow>, total: usize },
+    Saved { path: String, frames: u64 },
     Error { message: String },
 }
 
@@ -139,6 +140,7 @@ pub fn start_capture(
     interface: String,
     bpf: String,
     proto_dir: Option<String>,
+    save_path: Option<String>,
     on_rows: Channel<LiveEvent>,
 ) -> Result<(), String> {
     let engine = match &proto_dir {
@@ -164,6 +166,12 @@ pub fn start_capture(
     }
     let shared = state.analyzer.clone();
 
+    let mut writer = match &save_path {
+        Some(p) => Some(crate::pcapng_writer::PcapNgWriter::create(p)
+            .map_err(|e| format!("创建保存文件失败: {e}"))?),
+        None => None,
+    };
+
     let stop = Arc::new(AtomicBool::new(false));
     let stop2 = stop.clone();
     let shared2 = shared.clone();
@@ -178,6 +186,11 @@ pub fn start_capture(
                 Ok(pkt) => {
                     let ts_us = (pkt.header.ts.tv_sec as i64) * 1_000_000
                         + (pkt.header.ts.tv_usec as i64);
+                    if let Some(w) = writer.as_mut() {
+                        if let Err(e) = w.write_frame(ts_us, pkt.data) {
+                            let _ = on_rows.send(LiveEvent::Error { message: format!("保存文件写入失败: {e}") });
+                        }
+                    }
                     let msgs = live.feed(pkt.data, ts_us);
                     if msgs.is_empty() {
                         continue;
@@ -207,6 +220,19 @@ pub fn start_capture(
             }
         }
         let _ = on_rows.send(LiveEvent::Rows { rows: Vec::new(), updates: Vec::new(), total: 0 });
+        if let Some(w) = writer.take() {
+            let frames = w.frames();
+            match w.finish() {
+                Ok(()) => {
+                    if let Some(p) = &save_path {
+                        let _ = on_rows.send(LiveEvent::Saved { path: p.clone(), frames });
+                    }
+                }
+                Err(e) => {
+                    let _ = on_rows.send(LiveEvent::Error { message: format!("保存文件收尾失败: {e}") });
+                }
+            }
+        }
     });
 
     *state.live.lock().unwrap() = Some(LiveHandle {

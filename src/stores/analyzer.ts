@@ -143,6 +143,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const follow = ref(true)
   const liveTotal = ref(0)
   const pausedBuffer = shallowRef<PacketRow[]>([])
+  const savedInfo = ref<{ path: string; frames: number } | null>(null)
 
   async function loadInterfaces() {
     try {
@@ -159,9 +160,10 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     }
   }
 
-  async function startCapture() {
+  async function startCapture(savePath?: string) {
     loading.value = true
     error.value = null
+    savedInfo.value = null
     try {
       detailCache.clear()
       rows.value = []
@@ -181,6 +183,8 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
           } else {
             appendRows(event.rows, event.updates ?? [])
           }
+        } else if (event.kind === 'saved') {
+          savedInfo.value = { path: event.path, frames: event.frames }
         } else {
           error.value = event.message
           capturing.value = false
@@ -190,6 +194,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
         interface: selectedInterface.value,
         bpf: bpfFilter.value,
         protoDir: protoDir.value || null,
+        savePath: savePath ?? null,
         onRows: channel,
       })
       capturing.value = true
@@ -275,6 +280,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     follow,
     liveTotal,
     pausedBuffer,
+    savedInfo,
     openPcap,
     selectRow,
     loadInterfaces,

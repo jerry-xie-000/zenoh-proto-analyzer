@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod model;
-pub mod pipeline;
+pub mod pcapng_writer;
+mod pipeline;
 pub mod protobuf;
 pub mod reassembly;
 pub mod source;
