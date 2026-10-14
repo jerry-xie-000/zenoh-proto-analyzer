@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+@theme {
+  /* 调试工具深色主题色板 */
+  --color-bg-base: #0d1117;
+  --color-bg-panel: #161b22;
+  --color-bg-hover: #21262d;
+  --color-border-dim: #30363d;
+  --color-text-main: #e6edf3;
+  --color-text-dim: #8b949e;
+  --color-accent: #2f81f7;
+  --color-green: #3fb950;
+  --color-orange: #d29922;
+  --color-red: #f85149;
+  --color-purple: #bc8cff;
+  --color-cyan: #76e3ea;
+}
+
+html, body, #app {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  @apply bg-bg-base text-text-main text-[13px] antialiased select-none;
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+/* 等宽字体（时间/hex/字段值） */
+@utility mono {
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+.scrollbar-gutter {
+  /* 表头与数据体保留等宽滚动条槽，列对齐不受滚动条出现影响 */
+  scrollbar-gutter: stable;
+}
+
+@layer components {
+  .btn {
+    @apply flex items-center gap-1.5 px-2.5 h-7 rounded border border-border-dim bg-bg-hover/50
+      text-[12px] hover:bg-bg-hover hover:border-text-dim transition-colors
+      disabled:opacity-40 disabled:pointer-events-none whitespace-nowrap;
+  }
+  .input {
+    @apply h-7 px-2 rounded border border-border-dim bg-bg-base text-[12px]
+      outline-none focus:border-accent placeholder:text-text-dim/60;
+  }
+  .section {
+    @apply bg-bg-panel/60 border border-border-dim/60 rounded;
+  }
+  .section > summary {
+    @apply px-2 py-1 cursor-pointer text-[12px] font-medium text-text-main select-none;
+  }
+  .card {
+    @apply bg-bg-base border border-border-dim rounded p-3;
+  }
+  .label {
+    @apply text-[11px] text-text-dim mb-1;
+  }
+  .big {
+    @apply text-xl font-medium text-accent mono;
+  }
+}

@@ -1,0 +1,4 @@
+# Npcap SDK 路径（pcap crate 在 Windows 上链接 wpcap.lib 需要）
+# SDK 解压自 https://npcap.com/dist/npcap-sdk-1.16.zip
+[env]
+LIBPCAP_LIBDIR = "G:\\workspace\\wireshark_zenoh_protobuf\\zenoh-proto-analyzer\\vendor\\npcap-sdk\\Lib\\x64"
