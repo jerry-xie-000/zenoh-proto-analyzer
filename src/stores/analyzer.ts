@@ -11,6 +11,7 @@ import {
 } from '../types/messages'
 
 const PROTO_DIR_KEY = 'zenoh-analyzer.proto-dir'
+const THEME_KEY = 'zenoh-analyzer.theme'
 
 export const useAnalyzerStore = defineStore('analyzer', () => {
   // ---------- 数据 ----------
@@ -63,6 +64,22 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     }
     return list
   })
+
+  // ---------- 主题 ----------
+  const theme = ref<'dark' | 'light'>(
+    (localStorage.getItem(THEME_KEY) as 'dark' | 'light') ?? 'dark',
+  )
+  watch(
+    theme,
+    (t) => {
+      localStorage.setItem(THEME_KEY, t)
+      document.documentElement.classList.toggle('theme-light', t === 'light')
+    },
+    { immediate: true },
+  )
+  function toggleTheme() {
+    theme.value = theme.value === 'dark' ? 'light' : 'dark'
+  }
 
   // ---------- proto 配置持久化 ----------
   const protoDir = ref(localStorage.getItem(PROTO_DIR_KEY) ?? '')
@@ -270,6 +287,8 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     filterType,
     filterIncomplete,
     typeOptions,
+    theme,
+    toggleTheme,
     protoDir,
     lastPcapPath,
     reparseWithProto,

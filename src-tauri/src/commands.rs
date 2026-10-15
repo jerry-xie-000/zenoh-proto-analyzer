@@ -288,13 +288,14 @@ pub(crate) struct LiveParser {
     pub(crate) flows: HashMap<FlowKey, LiveFlow>,
     base_ts: Option<i64>,
     pending: Vec<zenoh::ParsedMessage>,
-    frame_no: u64,
 }
 
 #[derive(Clone)]
 pub(crate) struct LiveFlow {
     base_seq: Option<u32>,
     next_rel: u64,
+    /// 首次发现缺口的时间（µs），超过 2 秒未补上则放弃缺失字节
+    gap_since: Option<i64>,
     pending: BTreeMap<u64, (Vec<u8>, i64)>,
     stream: Vec<u8>,
     /// (字节偏移, 包编号, 时间戳)
@@ -308,7 +309,6 @@ impl LiveParser {
             flows: HashMap::new(),
             base_ts: None,
             pending: Vec::new(),
-            frame_no: 0,
         }
     }
 
@@ -332,13 +332,17 @@ impl LiveParser {
         let flow = self.flows.entry(key.clone()).or_insert_with(|| LiveFlow {
             base_seq: None,
             next_rel: 0,
+            gap_since: None,
             pending: BTreeMap::new(),
             stream: Vec::new(),
             stream_marks: Vec::new(),
         });
         let base = *flow.base_seq.get_or_insert(seg.seq);
         let rel = seg.seq.wrapping_sub(base) as u64;
-        // 同 seq 冲突保留更长的段（过滤 keepalive 探测）
+        // 同 seq 冲突保留更长的段；keepalive 探测（小且全零）直接丢弃
+        if seg.payload.len() <= 8 && seg.payload.iter().all(|&b| b == 0) {
+            return Vec::new();
+        }
         match flow.pending.get(&rel) {
             Some((old, _)) if old.len() >= seg.payload.len() => {}
             _ => {
@@ -346,16 +350,29 @@ impl LiveParser {
             }
         }
 
-        // 按序取出（有缺口则等待）。
+        // 按序取出（有缺口则短暂等待）。
         // 至少缓存 2 段才提交最前段：Windows keepalive 探测与真数据段同 seq，
         // 探测包（零字节垃圾）常先到达，延迟一段给"更长段替换"留出机会，
         // 否则流开头被污染后 batch 切分永久卡死。
+        // 缺口超过 2 秒未补（真丢段）则放弃缺失字节继续拼接。
         while flow.pending.len() >= 2 {
             let Some(&first) = flow.pending.keys().next() else {
                 break;
             };
             if first > flow.next_rel {
-                break;
+                match flow.gap_since {
+                    None => {
+                        flow.gap_since = Some(ts_us);
+                        break;
+                    }
+                    Some(t0) if ts_us.saturating_sub(t0) < 2_000_000 => break,
+                    _ => {
+                        // 真丢段：放弃缺失字节，从缺口处继续
+                        flow.next_rel = first;
+                        flow.gap_since = None;
+                        continue;
+                    }
+                }
             }
             let (mut data, ts) = flow.pending.remove(&first).unwrap();
             if first + data.len() as u64 <= flow.next_rel {
@@ -368,6 +385,7 @@ impl LiveParser {
             flow.stream_marks.push((flow.stream.len(), frame_no, ts));
             flow.stream.extend_from_slice(&data);
             flow.next_rel = first + (skip + data.len()) as u64;
+            flow.gap_since = None;
         }
 
         // 从 stream 前部按 batch 边界切分解析
@@ -578,7 +596,7 @@ mod tests {
         let frames = crate::source::read_file("../../测试用例/33333.pcapng").unwrap();
         let mut live = LiveParser::new();
         let mut an = Analyzer::empty(None);
-        for f in &frames {
+        for (i, f) in frames.iter().enumerate() {
             for m in live.feed(&f.data, f.ts_us, (i + 1) as u32) {
                 an.append_live(m);
             }
@@ -603,9 +621,9 @@ mod save_tests {
         let mut live = LiveParser::new();
         let mut an = Analyzer::empty(None);
         let mut fed = 0usize;
-        for f in &frames {
+        for (i, f) in frames.iter().enumerate() {
             an.frames_data
-                .insert((fed + 1) as u32, (f.ts_us, f.data.clone()));
+                .insert((i + 1) as u32, (f.ts_us, f.data.clone()));
             for m in live.feed(&f.data, f.ts_us, (i + 1) as u32) {
                 an.append_live(m);
             }

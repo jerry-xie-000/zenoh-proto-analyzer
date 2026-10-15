@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  /* 调试工具深色主题色板 */
+  /* 调试工具主题色板（默认深色） */
   --color-bg-base: #0d1117;
   --color-bg-panel: #161b22;
   --color-bg-hover: #21262d;
@@ -14,6 +14,22 @@
   --color-red: #f85149;
   --color-purple: #bc8cff;
   --color-cyan: #76e3ea;
+}
+
+/* 浅色主题：根元素挂 .theme-light 时覆盖语义变量 */
+.theme-light {
+  --color-bg-base: #ffffff;
+  --color-bg-panel: #f6f8fa;
+  --color-bg-hover: #eaeef2;
+  --color-border-dim: #d0d7de;
+  --color-text-main: #1f2328;
+  --color-text-dim: #656d76;
+  --color-accent: #0969da;
+  --color-green: #1a7f37;
+  --color-orange: #bc4c00;
+  --color-red: #cf222e;
+  --color-purple: #8250df;
+  --color-cyan: #0f7b87;
 }
 
 html, body, #app {
@@ -34,8 +50,8 @@ body {
 /* 滚动条 */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #30363d; border-radius: 5px; }
-::-webkit-scrollbar-thumb:hover { background: #484f58; }
+::-webkit-scrollbar-thumb { background: var(--color-border-dim); border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-dim); }
 
 .scrollbar-gutter {
   /* 表头与数据体保留等宽滚动条槽，列对齐不受滚动条出现影响 */

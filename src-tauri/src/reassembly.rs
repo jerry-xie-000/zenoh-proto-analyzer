@@ -47,6 +47,11 @@ impl StreamAssembler {
         if data.is_empty() {
             return;
         }
+        // TCP Keep-Alive 探测包过滤：len 很小且 payload 全零，
+        // 非应用数据，混入流会污染 batch 长度前缀
+        if data.len() <= 8 && data.iter().all(|&b| b == 0) {
+            return;
+        }
         self.flows.entry(key).or_default().push((seq, data.to_vec(), frame));
     }
 

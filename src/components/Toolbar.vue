@@ -6,7 +6,9 @@ import {
   ChartColumn,
   FileArchive,
   FolderOpen,
+  Moon,
   Search,
+  Sun,
   Trash2,
   X,
 } from 'lucide-vue-next'
@@ -87,6 +89,15 @@ watch(() => store.protoDir, countProto, { immediate: true })
     </div>
 
     <div class="flex-1" />
+
+    <button
+      class="btn"
+      :title="store.theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'"
+      @click="store.toggleTheme()"
+    >
+      <Sun v-if="store.theme === 'dark'" :size="15" />
+      <Moon v-else :size="15" />
+    </button>
 
     <div class="relative">
       <Search :size="14" class="absolute left-2 top-1/2 -translate-y-1/2 text-text-dim" />
