@@ -218,6 +218,10 @@ fn build_analyzer(
     let mut pair: HashMap<usize, usize> = HashMap::new(); // index → 对端 index
 
     let mut by_type: HashMap<String, usize> = HashMap::new();
+    #[derive(Default)]
+    struct RateAcc { first: i64, last: i64, count: usize }
+    let mut topic_rate: HashMap<String, RateAcc> = HashMap::new();
+    let mut inner_rate: HashMap<String, RateAcc> = HashMap::new();
     let mut by_topic: HashMap<String, usize> = HashMap::new();
     let mut devices: Vec<String> = Vec::new();
     let mut sessions_seen: Vec<String> = Vec::new();
@@ -270,7 +274,7 @@ fn build_analyzer(
             topic: msg.topic.clone(),
             topic_complete: msg.topic_complete,
             outer_type,
-            any_type,
+            any_type: any_type.clone(),
             device_id,
             summary,
             rid: msg.rid,
@@ -303,9 +307,29 @@ fn build_analyzer(
         }
 
         *by_type.entry(msg.msg_type.clone()).or_default() += 1;
-        if !msg.topic.is_empty() {
-            *by_topic.entry(topic_short(&msg.topic)).or_default() += 1;
+        let topic_key = topic_short(&msg.topic);
+        *by_topic.entry(topic_key.clone()).or_default() += 1;
+
+        // 帧率累加：按 topic；get/set 查询额外按内部类型（Any 目标）
+        let acc = topic_rate.entry(topic_key.clone()).or_insert_with(|| RateAcc {
+            first: msg.ts_us,
+            last: msg.ts_us,
+            count: 0,
+        });
+        acc.count += 1;
+        acc.last = msg.ts_us;
+        let is_query_topic = topic_contains_query(&msg.topic);
+        if is_query_topic && !any_type.is_empty() {
+            let k = format!("{} → {}", topic_key, any_type);
+            let acc2 = inner_rate.entry(k).or_insert_with(|| RateAcc {
+                first: msg.ts_us,
+                last: msg.ts_us,
+                count: 0,
+            });
+            acc2.count += 1;
+            acc2.last = msg.ts_us;
         }
+
         if !sessions_seen.contains(&e.session) {
             sessions_seen.push(e.session.clone());
         }
@@ -350,10 +374,29 @@ fn build_analyzer(
         }
     }
 
+    // 帧率：count / 时长（秒），时长 <1s 时按 1s 计
+    let rate_of = |acc: &RateAcc| -> f64 {
+        let dur = (acc.last - acc.first) as f64 / 1_000_000.0;
+        let dur = dur.max(1.0);
+        acc.count as f64 / dur
+    };
+    let mut topic_rates: Vec<(String, f64)> = topic_rate
+        .into_iter()
+        .map(|(k, a)| (k, rate_of(&a)))
+        .collect();
+    topic_rates.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal));
+    let mut query_type_rates: Vec<(String, f64)> = inner_rate
+        .into_iter()
+        .map(|(k, a)| (k, rate_of(&a)))
+        .collect();
+    query_type_rates.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal));
+
     let mut stats = Stats {
         total: entries.len(),
         by_type: drain_sorted(by_type),
         by_topic: drain_sorted(by_topic),
+        topic_rates,
+        query_type_rates,
         devices,
         ts_first: entries.first().map(|e| e.row.ts_us),
         ts_last: entries.last().map(|e| e.row.ts_us),
@@ -371,6 +414,10 @@ fn build_analyzer(
         pair: HashMap::new(),
         frames_data: frames_map,
     })
+}
+
+fn topic_contains_query(t: &str) -> bool {
+    t.contains("/query/get") || t.contains("/query/set")
 }
 
 fn topic_short(t: &str) -> String {

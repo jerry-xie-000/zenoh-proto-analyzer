@@ -67,7 +67,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   // ---------- 主题 ----------
   const theme = ref<'dark' | 'light'>(
-    (localStorage.getItem(THEME_KEY) as 'dark' | 'light') ?? 'dark',
+    (localStorage.getItem(THEME_KEY) as 'dark' | 'light') ?? 'light',
   )
   watch(
     theme,

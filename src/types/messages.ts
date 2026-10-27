@@ -51,6 +51,8 @@ export interface Stats {
   total: number
   byType: [string, number][]
   byTopic: [string, number][]
+  topicRates: [string, number][]
+  queryTypeRates: [string, number][]
   devices: string[]
   tsFirst: number | null
   tsLast: number | null

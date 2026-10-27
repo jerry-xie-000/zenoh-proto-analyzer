@@ -72,6 +72,36 @@ function fmtTime(ts: number | null): string {
             </div>
           </div>
         </div>
+
+        <!-- 帧率 -->
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <div class="sec-title">Topic 帧率（msg/s）</div>
+            <div v-for="[t, r] in store.stats.topicRates.slice(0, 15)" :key="t" class="flex items-center gap-2 h-6">
+              <div class="w-56 truncate text-[12px]" :title="t">{{ t }}</div>
+              <div class="flex-1 h-3 bg-bg-base rounded overflow-hidden">
+                <div
+                  class="h-full bg-green/60 rounded"
+                  :style="{ width: `${(r / (store.stats.topicRates[0]?.[1] || 1)) * 100}%` }"
+                />
+              </div>
+              <div class="mono text-[12px] text-text-dim w-16 text-right">{{ r.toFixed(1) }}</div>
+            </div>
+          </div>
+          <div>
+            <div class="sec-title">get/set 内部类型帧率（msg/s）</div>
+            <div v-for="[t, r] in store.stats.queryTypeRates.slice(0, 15)" :key="t" class="flex items-center gap-2 h-6">
+              <div class="w-56 truncate text-[12px]" :title="t">{{ t }}</div>
+              <div class="flex-1 h-3 bg-bg-base rounded overflow-hidden">
+                <div
+                  class="h-full bg-orange/60 rounded"
+                  :style="{ width: `${(r / (store.stats.queryTypeRates[0]?.[1] || 1)) * 100}%` }"
+                />
+              </div>
+              <div class="mono text-[12px] text-text-dim w-16 text-right">{{ r.toFixed(1) }}</div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

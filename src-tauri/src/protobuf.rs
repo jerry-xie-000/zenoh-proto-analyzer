@@ -321,19 +321,12 @@ impl ProtoEngine {
 
 const MAX_HEX_BYTES: usize = 4096;
 
-/// 遍历已设置字段（get_field 恒返回 Cow<Value>，对隐式 presence 标量返回默认值）
+/// 遍历字段：全部显示（含 proto3 默认值 0 等，用户要求补全）
 fn iter_fields(msg: &DynamicMessage) -> Vec<(FieldDescriptor, Value)> {
-    let desc = msg.descriptor();
-    let mut out = Vec::new();
-    for field in desc.fields() {
-        let value = msg.get_field(&field).into_owned();
-        // 隐式 presence 的标量零值不显示（proto3 未设置），减少噪音
-        if is_implicit_default(&field, &value) {
-            continue;
-        }
-        out.push((field, value));
-    }
-    out
+    msg.descriptor()
+        .fields()
+        .map(|f| (f.clone(), msg.get_field(&f).into_owned()))
+        .collect()
 }
 
 fn is_implicit_default(field: &FieldDescriptor, v: &Value) -> bool {
