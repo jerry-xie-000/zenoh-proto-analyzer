@@ -79,10 +79,6 @@ pub struct Stats {
     pub by_type: Vec<(String, usize)>,
     /// topic → 数量（按数量降序）
     pub by_topic: Vec<(String, usize)>,
-    /// Topic 帧率（msg/s，按速率降序）
-    pub topic_rates: Vec<(String, f64)>,
-    /// get/set 查询的内部类型帧率（"topic → 内部类型" → msg/s，按速率降序）
-    pub query_type_rates: Vec<(String, f64)>,
     /// 设备 id 集合（PacketHead.device_id）
     pub devices: Vec<String>,
     /// 时间范围（微秒）
